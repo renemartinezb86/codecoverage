@@ -1,0 +1,956 @@
+From 01b55a4701a0af69471f64974463c5fb8f6e4f47 Mon Sep 17 00:00:00 2001
+From: Rene <rene.martinez.b86@gmail.com>
+Date: Fri, 7 Sep 2018 01:16:43 -0300
+Subject: [PATCH] My submission
+XOV: XO_0_0_1
+
+---
+ .gitignore                                         |   1 +
+ build.gradle                                       |  11 +-
+ gradlew                                            |   0
+ .../techtrial/controller/PersonController.java     |   2 +-
+ .../techtrial/controller/RideController.java       | 106 +++++---
+ .../java/com/crossover/techtrial/model/Ride.java   | 289 +++++++++++----------
+ .../techtrial/repositories/RideRepository.java     |  18 +-
+ .../techtrial/service/RideServiceImpl.java         |  30 +--
+ .../resources/db/changelog/db.changelog-1.1.xml    |  24 ++
+ .../resources/db/changelog/db.changelog-master.xml |   1 +
+ .../techtrial/controller/PersonControllerTest.java | 114 +++++---
+ .../techtrial/controller/RideControllerTest.java   | 146 +++++++++++
+ 12 files changed, 507 insertions(+), 235 deletions(-)
+ mode change 100755 => 100644 gradlew
+ create mode 100644 src/main/resources/db/changelog/db.changelog-1.1.xml
+ create mode 100644 src/test/java/com/crossover/techtrial/controller/RideControllerTest.java
+
+diff --git a/.gitignore b/.gitignore
+index 38e8d91..4960bd7 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,6 +2,7 @@
+ bin/*
+ /.classpath
+ /.project
++/.idea
+ .gradle/*
+ build/*
+ target/*
+diff --git a/build.gradle b/build.gradle
+index 2d73af5..e9bd0d1 100644
+--- a/build.gradle
++++ b/build.gradle
+@@ -11,6 +11,7 @@ buildscript {
+ 	dependencies {
+ 		classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+ 		classpath('com.github.ksoichiro:gradle-console-reporter:0.5.0')
++		classpath("gradle.plugin.com.palantir:jacoco-coverage:0.4.0")
+ 	}
+ }
+ 
+@@ -21,6 +22,7 @@ apply plugin: "io.spring.dependency-management"
+ apply plugin: 'org.springframework.boot'
+ apply plugin: 'io.spring.dependency-management'
+ apply plugin: 'com.github.ksoichiro.console.reporter'
++apply plugin: "com.palantir.jacoco-full-report"
+ 
+ group = 'com.crossover'
+ version = '0.0.1-SNAPSHOT'
+@@ -44,4 +46,11 @@ dependencies {
+ 	testCompile('org.mockito:mockito-core:2.7.22')
+ 	
+ }
+-
++jacocoTestReport {
++	group = "Reporting"
++	reports {
++		xml.enabled true
++		csv.enabled false
++		html.destination "${buildDir}/reports/coverage"
++	}
++}
+diff --git a/gradlew b/gradlew
+old mode 100755
+new mode 100644
+diff --git a/src/main/java/com/crossover/techtrial/controller/PersonController.java b/src/main/java/com/crossover/techtrial/controller/PersonController.java
+index ded9199..b588af2 100644
+--- a/src/main/java/com/crossover/techtrial/controller/PersonController.java
++++ b/src/main/java/com/crossover/techtrial/controller/PersonController.java
+@@ -35,7 +35,7 @@ public class PersonController {
+     return ResponseEntity.ok(personService.getAll());
+   }
+   
+-  @GetMapping(path = "/api/person/{perso-id}")
++  @GetMapping(path = "/api/person/{person-id}")
+   public ResponseEntity<Person> getPersonById(@PathVariable(name="person-id", required=true)Long personId) {
+     Person person = personService.findById(personId);
+     if (person != null) {
+diff --git a/src/main/java/com/crossover/techtrial/controller/RideController.java b/src/main/java/com/crossover/techtrial/controller/RideController.java
+index baea0d8..d1c60a1 100644
+--- a/src/main/java/com/crossover/techtrial/controller/RideController.java
++++ b/src/main/java/com/crossover/techtrial/controller/RideController.java
+@@ -1,13 +1,20 @@
+ /**
+- * 
++ *
+  */
+ package com.crossover.techtrial.controller;
+ 
++import java.sql.Timestamp;
+ import java.time.LocalDateTime;
++import java.time.temporal.ChronoUnit;
+ import java.util.ArrayList;
+ import java.util.List;
++import java.util.stream.Collectors;
++
++import com.crossover.techtrial.repositories.RideRepository;
++import com.crossover.techtrial.service.PersonService;
+ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.format.annotation.DateTimeFormat;
++import org.springframework.http.HttpStatus;
+ import org.springframework.http.ResponseEntity;
+ import org.springframework.web.bind.annotation.GetMapping;
+ import org.springframework.web.bind.annotation.PathVariable;
+@@ -21,49 +28,70 @@ import com.crossover.techtrial.service.RideService;
+ 
+ /**
+  * RideController for Ride related APIs.
+- * @author crossover
+  *
++ * @author crossover
+  */
+ @RestController
+ public class RideController {
+-  
+-  @Autowired
+-  RideService rideService;
+ 
+-  @PostMapping(path ="/api/ride")
+-  public ResponseEntity<Ride> createNewRide(@RequestBody Ride ride) {
+-    return ResponseEntity.ok(rideService.save(ride));
+-  }
+-  
+-  @GetMapping(path = "/api/ride/{ride-id}")
+-  public ResponseEntity<Ride> getRideById(@PathVariable(name="ride-id",required=true)Long rideId){
+-    Ride ride = rideService.findById(rideId);
+-    if (ride!=null)
+-      return ResponseEntity.ok(ride);
+-    return ResponseEntity.notFound().build();
+-  }
+-  
+-  /**
+-   * This API returns the top 5 drivers with their email,name, total minutes, maximum ride duration in minutes.
+-   * Only rides that starts and ends within the mentioned durations should be counted.
+-   * Any rides where either start or endtime is outside the search, should not be considered.
+-   * 
+-   * DONT CHANGE METHOD SIGNATURE AND RETURN TYPES
+-   * @return
+-   */
+-  @GetMapping(path = "/api/top-rides")
+-  public ResponseEntity<List<TopDriverDTO>> getTopDriver(
+-      @RequestParam(value="max", defaultValue="5") Long count,
+-      @RequestParam(value="startTime", required=true) @DateTimeFormat(pattern="yyyy-MM-dd'T'HH:mm:ss") LocalDateTime startTime,
+-      @RequestParam(value="endTime", required=true) @DateTimeFormat(pattern="yyyy-MM-dd'T'HH:mm:ss") LocalDateTime endTime){
+-    List<TopDriverDTO> topDrivers = new ArrayList<TopDriverDTO>();
++    @Autowired
++    RideService rideService;
++
++    @Autowired
++    RideRepository rideRepository;
++
++    @Autowired
++    PersonService personService;
++
++    @PostMapping(path = "/api/ride")
++    public ResponseEntity<Ride> createNewRide(@RequestBody Ride ride) {
++        String errors = "";
++        //Validating existing drivers and riders
++        if (personService.findById(ride.getDriver().getId()) == null)
++            errors += "Only registered drivers allowed. ";
++
++        if (personService.findById(ride.getRider().getId()) == null)
++            errors += "Only registered riders allowed. ";
++
++        //Validating chronological rides time
++        if (!ride.getEndTime().isAfter(ride.getStartTime())) {
++            errors += "Ride endTime should be greater than startTime. ";
++        }
++        //Pre-calculation of ride duration for new API
++        long seconds = ride.getStartTime().until(ride.getEndTime(), ChronoUnit.SECONDS);
++        ride.setDuration(seconds);
++        return errors.length() > 0 ? new ResponseEntity(errors, HttpStatus.BAD_REQUEST) : ResponseEntity.ok(rideService.save(ride));
++    }
++
++    @GetMapping(path = "/api/ride/{ride-id}")
++    public ResponseEntity<Ride> getRideById(@PathVariable(name = "ride-id", required = true) Long rideId) {
++        Ride ride = rideService.findById(rideId);
++        return ride != null ? ResponseEntity.ok(ride) : ResponseEntity.notFound().build();
++    }
++
+     /**
+-     * Your Implementation Here. And Fill up topDrivers Arraylist with Top
+-     * 
++     * This API returns the top 5 drivers with their email,name, total minutes, maximum ride duration in minutes.
++     * Only rides that starts and ends within the mentioned durations should be counted.
++     * Any rides where either start or endtime is outside the search, should not be considered.
++     * <p>
++     * DONT CHANGE METHOD SIGNATURE AND RETURN TYPES
++     *
++     * @return
+      */
+-    
+-    return ResponseEntity.ok(topDrivers);
+-    
+-  }
+-  
++    @GetMapping(path = "/api/top-rides")
++    public ResponseEntity<List<TopDriverDTO>> getTopDriver(
++            @RequestParam(value = "max", defaultValue = "5") Long count,
++            @RequestParam(value = "startTime", required = true) @DateTimeFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss") LocalDateTime startTime,
++            @RequestParam(value = "endTime", required = true) @DateTimeFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss") LocalDateTime endTime) {
++        List<TopDriverDTO> topDrivers = rideRepository.
++                getTopDriver(startTime, endTime).stream().limit(5).collect(Collectors.toList());
++        /**
++         * Your Implementation Here. And Fill up topDrivers Arraylist with Top
++         *
++         */
++
++        return ResponseEntity.ok(topDrivers);
++
++    }
++
+ }
+diff --git a/src/main/java/com/crossover/techtrial/model/Ride.java b/src/main/java/com/crossover/techtrial/model/Ride.java
+index 1740eea..1c8feeb 100644
+--- a/src/main/java/com/crossover/techtrial/model/Ride.java
++++ b/src/main/java/com/crossover/techtrial/model/Ride.java
+@@ -1,9 +1,10 @@
+ /**
+- * 
++ *
+  */
+ package com.crossover.techtrial.model;
+ 
+ import java.io.Serializable;
++import java.time.LocalDateTime;
+ import javax.persistence.Column;
+ import javax.persistence.Entity;
+ import javax.persistence.GeneratedValue;
+@@ -16,143 +17,151 @@ import javax.validation.constraints.NotNull;
+ 
+ @Entity
+ @Table(name = "ride")
+-public class Ride implements Serializable{
+-
+-  private static final long serialVersionUID = 9097639215351514001L;
+-
+-  @Id
+-  @GeneratedValue(strategy = GenerationType.IDENTITY)
+-  Long id;
+-
+-  @NotNull
+-  @Column(name = "start_time")
+-  String startTime;
+-  
+-  @NotNull
+-  @Column(name = "end_time")
+-  String endTime;
+-  
+-  @Column(name = "distance")
+-  Long distance;
+-  
+-  @ManyToOne
+-  @JoinColumn(name = "driver_id", referencedColumnName = "id")
+-  Person driver;
+-  
+-  @ManyToOne
+-  @JoinColumn(name = "rider_id", referencedColumnName = "id")
+-  Person rider;
+-
+-  public Long getId() {
+-    return id;
+-  }
+-
+-  public void setId(Long id) {
+-    this.id = id;
+-  }
+-
+-  public String getStartTime() {
+-    return startTime;
+-  }
+-
+-  public void setStartTime(String startTime) {
+-    this.startTime = startTime;
+-  }
+-
+-  public String getEndTime() {
+-    return endTime;
+-  }
+-
+-  public void setEndTime(String endTime) {
+-    this.endTime = endTime;
+-  }
+-
+-  public Long getDistance() {
+-    return distance;
+-  }
+-
+-  public void setDistance(Long distance) {
+-    this.distance = distance;
+-  }
+-
+-  public Person getDriver() {
+-    return driver;
+-  }
+-
+-  public void setDriver(Person driver) {
+-    this.driver = driver;
+-  }
+-
+-  public Person getRider() {
+-    return rider;
+-  }
+-
+-  public void setRider(Person rider) {
+-    this.rider = rider;
+-  }
+-  
+-  
+-
+-  @Override
+-  public int hashCode() {
+-    final int prime = 31;
+-    int result = 1;
+-    result = prime * result + ((distance == null) ? 0 : distance.hashCode());
+-    result = prime * result + ((driver == null) ? 0 : driver.hashCode());
+-    result = prime * result + ((endTime == null) ? 0 : endTime.hashCode());
+-    result = prime * result + ((id == null) ? 0 : id.hashCode());
+-    result = prime * result + ((rider == null) ? 0 : rider.hashCode());
+-    result = prime * result + ((startTime == null) ? 0 : startTime.hashCode());
+-    return result;
+-  }
+-
+-  @Override
+-  public boolean equals(Object obj) {
+-    if (this == obj)
+-      return true;
+-    if (obj == null)
+-      return false;
+-    if (getClass() != obj.getClass())
+-      return false;
+-    Ride other = (Ride) obj;
+-    if (distance == null) {
+-      if (other.distance != null)
+-        return false;
+-    } else if (!distance.equals(other.distance))
+-      return false;
+-    if (driver == null) {
+-      if (other.driver != null)
+-        return false;
+-    } else if (!driver.equals(other.driver))
+-      return false;
+-    if (endTime == null) {
+-      if (other.endTime != null)
+-        return false;
+-    } else if (!endTime.equals(other.endTime))
+-      return false;
+-    if (id == null) {
+-      if (other.id != null)
+-        return false;
+-    } else if (!id.equals(other.id))
+-      return false;
+-    if (rider == null) {
+-      if (other.rider != null)
+-        return false;
+-    } else if (!rider.equals(other.rider))
+-      return false;
+-    if (startTime == null) {
+-      if (other.startTime != null)
+-        return false;
+-    } else if (!startTime.equals(other.startTime))
+-      return false;
+-    return true;
+-  }
+-
+-  @Override
+-  public String toString() {
+-    return "Ride [id=" + id + ", startTime=" + startTime + ", endTime=" + endTime + ", distance=" + distance + ", driver=" + driver + ", rider=" + rider + "]";
+-  }
+-  
+-  
+-  
++public class Ride implements Serializable {
++
++    private static final long serialVersionUID = 9097639215351514001L;
++
++    @Id
++    @GeneratedValue(strategy = GenerationType.IDENTITY)
++    Long id;
++
++    @NotNull
++    @Column(name = "start_time")
++    LocalDateTime startTime;
++
++    @NotNull
++    @Column(name = "end_time")
++    LocalDateTime endTime;
++
++    @Column(name = "distance")
++    Long distance;
++
++    @Column(name = "duration")
++    private
++    Long duration;
++
++    @ManyToOne
++    @JoinColumn(name = "driver_id", referencedColumnName = "id")
++    Person driver;
++
++    @ManyToOne
++    @JoinColumn(name = "rider_id", referencedColumnName = "id")
++    Person rider;
++
++    public Long getId() {
++        return id;
++    }
++
++    public void setId(Long id) {
++        this.id = id;
++    }
++
++    public LocalDateTime getStartTime() {
++        return startTime;
++    }
++
++    public void setStartTime(LocalDateTime startTime) {
++        this.startTime = startTime;
++    }
++
++    public LocalDateTime getEndTime() {
++        return endTime;
++    }
++
++    public void setEndTime(LocalDateTime endTime) {
++        this.endTime = endTime;
++    }
++
++    public Long getDistance() {
++        return distance;
++    }
++
++    public void setDistance(Long distance) {
++        this.distance = distance;
++    }
++
++    public Person getDriver() {
++        return driver;
++    }
++
++    public void setDriver(Person driver) {
++        this.driver = driver;
++    }
++
++    public Person getRider() {
++        return rider;
++    }
++
++    public void setRider(Person rider) {
++        this.rider = rider;
++    }
++
++    @Override
++    public int hashCode() {
++        final int prime = 31;
++        int result = 1;
++        result = prime * result + ((distance == null) ? 0 : distance.hashCode());
++        result = prime * result + ((driver == null) ? 0 : driver.hashCode());
++        result = prime * result + ((endTime == null) ? 0 : endTime.hashCode());
++        result = prime * result + ((id == null) ? 0 : id.hashCode());
++        result = prime * result + ((rider == null) ? 0 : rider.hashCode());
++        result = prime * result + ((startTime == null) ? 0 : startTime.hashCode());
++        return result;
++    }
++
++    @Override
++    public boolean equals(Object obj) {
++        if (this == obj)
++            return true;
++        if (obj == null)
++            return false;
++        if (getClass() != obj.getClass())
++            return false;
++        Ride other = (Ride) obj;
++        if (distance == null) {
++            if (other.distance != null)
++                return false;
++        } else if (!distance.equals(other.distance))
++            return false;
++        if (driver == null) {
++            if (other.driver != null)
++                return false;
++        } else if (!driver.equals(other.driver))
++            return false;
++        if (endTime == null) {
++            if (other.endTime != null)
++                return false;
++        } else if (!endTime.equals(other.endTime))
++            return false;
++        if (id == null) {
++            if (other.id != null)
++                return false;
++        } else if (!id.equals(other.id))
++            return false;
++        if (rider == null) {
++            if (other.rider != null)
++                return false;
++        } else if (!rider.equals(other.rider))
++            return false;
++        if (startTime == null) {
++            if (other.startTime != null)
++                return false;
++        } else if (!startTime.equals(other.startTime))
++            return false;
++        return true;
++    }
++
++    @Override
++    public String toString() {
++        return "Ride [id=" + id + ", startTime=" + startTime + ", endTime=" + endTime + ", distance=" + distance + ", driver=" + driver + ", rider=" + rider + "]";
++    }
++
++
++    public Long getDuration() {
++        return duration;
++    }
++
++    public void setDuration(Long duration) {
++        this.duration = duration;
++    }
+ }
+diff --git a/src/main/java/com/crossover/techtrial/repositories/RideRepository.java b/src/main/java/com/crossover/techtrial/repositories/RideRepository.java
+index 99ace01..d434c22 100644
+--- a/src/main/java/com/crossover/techtrial/repositories/RideRepository.java
++++ b/src/main/java/com/crossover/techtrial/repositories/RideRepository.java
+@@ -1,17 +1,31 @@
+ /**
+- * 
++ *
+  */
+ package com.crossover.techtrial.repositories;
+ 
++import com.crossover.techtrial.dto.TopDriverDTO;
+ import com.crossover.techtrial.model.Ride;
++import org.springframework.data.jpa.repository.Query;
+ import org.springframework.data.repository.CrudRepository;
+ import org.springframework.data.rest.core.annotation.RestResource;
+ 
++import java.time.LocalDate;
++import java.time.LocalDateTime;
++import java.util.List;
++import java.util.Optional;
++
+ /**
+  * @author crossover
+- *
+  */
+ @RestResource(exported = false)
+ public interface RideRepository extends CrudRepository<Ride, Long> {
++    Optional<Ride> findById(Long id);
+ 
++    //Custom repository method for allDailyElectricityFromYesterday fn
++    @Query("select new com.crossover.techtrial.dto.TopDriverDTO (r.driver.name, r.driver.email, sum(r.duration),max(r.duration),avg(r.distance)) " +
++            "from Ride r \n" +
++            "where r.startTime>?1 and r.endTime < ?2\n" +
++            "group by r.driver.id \n" +
++            "order by r.duration desc")
++    List<TopDriverDTO> getTopDriver(LocalDateTime start, LocalDateTime end);
+ }
+diff --git a/src/main/java/com/crossover/techtrial/service/RideServiceImpl.java b/src/main/java/com/crossover/techtrial/service/RideServiceImpl.java
+index 4a647cc..966b6d1 100644
+--- a/src/main/java/com/crossover/techtrial/service/RideServiceImpl.java
++++ b/src/main/java/com/crossover/techtrial/service/RideServiceImpl.java
+@@ -1,9 +1,10 @@
+ /**
+- * 
++ *
+  */
+ package com.crossover.techtrial.service;
+ 
+ import java.util.Optional;
++
+ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.stereotype.Service;
+ import com.crossover.techtrial.model.Ride;
+@@ -11,23 +12,20 @@ import com.crossover.techtrial.repositories.RideRepository;
+ 
+ /**
+  * @author crossover
+- *
+  */
+ @Service
+-public class RideServiceImpl implements RideService{
++public class RideServiceImpl implements RideService {
++
++    @Autowired
++    RideRepository rideRepository;
+ 
+-  @Autowired
+-  RideRepository rideRepository;
+-  
+-  public Ride save(Ride ride) {
+-    return rideRepository.save(ride);
+-  }
+-  
+-  public Ride findById(Long rideId) {
+-    Optional<Ride> optionalRide = rideRepository.findById(rideId);
+-    if (optionalRide.isPresent()) {
+-      return optionalRide.get();
+-    }else return null;
+-  }
++    public Ride save(Ride ride) {
++        return rideRepository.save(ride);
++    }
+ 
++    @Override
++    public Ride findById(Long rideId) {
++        Optional<Ride> optionalRide = rideRepository.findById(rideId);
++        return optionalRide.orElse(null);
++    }
+ }
+diff --git a/src/main/resources/db/changelog/db.changelog-1.1.xml b/src/main/resources/db/changelog/db.changelog-1.1.xml
+new file mode 100644
+index 0000000..3359c91
+--- /dev/null
++++ b/src/main/resources/db/changelog/db.changelog-1.1.xml
+@@ -0,0 +1,24 @@
++<?xml version="1.1" encoding="UTF-8" standalone="no"?>
++<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
++                   xmlns:ext="http://www.liquibase.org/xml/ns/dbchangelog-ext"
++                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
++                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog-ext http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-ext.xsd http://www.liquibase.org/xml/ns/dbchangelog http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.5.xsd">
++    <changeSet author="Rene" id="modifyStartTimeDataType">
++        <modifyDataType
++                columnName="start_time"
++                newDataType="DATETIME "
++                tableName="ride"/>
++    </changeSet>
++    <changeSet author="Rene" id="modifyEndTimeDataType">
++        <modifyDataType
++                columnName="end_time"
++                newDataType="DATETIME "
++                tableName="ride"/>
++    </changeSet>
++    <changeSet author="Rene" id="addAggColumnDuration">
++        <addColumn
++                tableName="ride">
++            <column name="duration" type="BIGINT(20)"/>
++        </addColumn>
++    </changeSet>
++</databaseChangeLog>
+diff --git a/src/main/resources/db/changelog/db.changelog-master.xml b/src/main/resources/db/changelog/db.changelog-master.xml
+index ea61ac5..03d177a 100644
+--- a/src/main/resources/db/changelog/db.changelog-master.xml
++++ b/src/main/resources/db/changelog/db.changelog-master.xml
+@@ -3,4 +3,5 @@
+   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.4.xsd">
+   <include file="db/changelog/db.changelog-1.0.xml"/>
++  <include file="db/changelog/db.changelog-1.1.xml"/>
+ </databaseChangeLog>
+\ No newline at end of file
+diff --git a/src/test/java/com/crossover/techtrial/controller/PersonControllerTest.java b/src/test/java/com/crossover/techtrial/controller/PersonControllerTest.java
+index 9ffe808..c2f6291 100644
+--- a/src/test/java/com/crossover/techtrial/controller/PersonControllerTest.java
++++ b/src/test/java/com/crossover/techtrial/controller/PersonControllerTest.java
+@@ -1,5 +1,5 @@
+ /**
+- * 
++ *
+  */
+ package com.crossover.techtrial.controller;
+ 
+@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.boot.test.context.SpringBootTest;
+ import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+ import org.springframework.boot.test.web.client.TestRestTemplate;
++import org.springframework.core.ParameterizedTypeReference;
+ import org.springframework.http.HttpEntity;
+ import org.springframework.http.HttpHeaders;
+ import org.springframework.http.MediaType;
+@@ -22,47 +23,88 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+ import com.crossover.techtrial.model.Person;
+ import com.crossover.techtrial.repositories.PersonRepository;
+ 
++import java.util.List;
++
+ /**
+  * @author kshah
+- *
+  */
+ @RunWith(SpringJUnit4ClassRunner.class)
+ @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+ public class PersonControllerTest {
+-  
+-  MockMvc mockMvc;
+-  
+-  @Mock
+-  private PersonController personController;
+-  
+-  @Autowired
+-  private TestRestTemplate template;
+-  
+-  @Autowired
+-  PersonRepository personRepository;
+-  
+-  @Before
+-  public void setup() throws Exception {
+-    mockMvc = MockMvcBuilders.standaloneSetup(personController).build();
+-  }
+-  
+-  @Test
+-  public void testPanelShouldBeRegistered() throws Exception {
+-    HttpEntity<Object> person = getHttpEntity(
+-        "{\"name\": \"test 1\", \"email\": \"test10000000000001@gmail.com\"," 
+-            + " \"registrationNumber\": \"41DCT\",\"registrationDate\":\"2018-08-08T12:12:12\" }");
+-    ResponseEntity<Person> response = template.postForEntity(
+-        "/api/person", person, Person.class);
+-    //Delete this user
+-    personRepository.deleteById(response.getBody().getId());
+-    Assert.assertEquals("test 1", response.getBody().getName());
+-    Assert.assertEquals(200,response.getStatusCode().value());
+-  }
+ 
+-  private HttpEntity<Object> getHttpEntity(Object body) {
+-    HttpHeaders headers = new HttpHeaders();
+-    headers.setContentType(MediaType.APPLICATION_JSON);
+-    return new HttpEntity<Object>(body, headers);
+-  }
++    MockMvc mockMvc;
++
++    @Mock
++    private PersonController personController;
++
++    @Autowired
++    private TestRestTemplate template;
++
++    @Autowired
++    PersonRepository personRepository;
++
++    @Before
++    public void setup() throws Exception {
++        mockMvc = MockMvcBuilders.standaloneSetup(personController).build();
++    }
++
++    /**
++     * Fixed test method name testPanelShouldBeRegistered
++     * remove registrationDate from json payload as not defined on Person Model
++     */
++    @Test
++    public void testPersonShouldBeRegistered() throws Exception {
++        HttpEntity<Object> person = getHttpEntity(
++                "{\"name\": \"test 1\", \"email\": \"test10000000000001@gmail.com\","
++                        + " \"registrationNumber\": \"41DCT\"}");
++        ResponseEntity<Person> response = template.postForEntity(
++                "/api/person", person, Person.class);
++        //Delete this user
++        personRepository.deleteById(response.getBody().getId());
++        Assert.assertEquals("test 1", response.getBody().getName());
++        Assert.assertEquals(200, response.getStatusCode().value());
++    }
++
++    @Test
++    public void testPersonShouldBeLoadedById() throws Exception {
++        Person person = new Person();
++        Assert.assertTrue(person.toString().contains("Person"));
++        person.setName("test 1");
++        person.setEmail("test10000000000001@gmail.com");
++        person.setRegistrationNumber("41DCT");
++        personRepository.save(person);
++        ResponseEntity<Person> response = template.getForEntity(
++                "/api/person/" + person.getId(), Person.class);
++        //Delete this user
++        personRepository.deleteById(response.getBody().getId());
++        Assert.assertEquals(person, response.getBody());
++        Assert.assertEquals(200, response.getStatusCode().value());
++    }
++
++    @Test
++    public void testPersonShouldBeAllLoaded() throws Exception {
++        Person person1 = new Person();
++        person1.setName("test 1");
++        person1.setEmail("test10000000000001@gmail.com");
++        person1.setRegistrationNumber("41DCT");
++        personRepository.save(person1);
++        Person person2 = new Person();
++        person2.setName("test 2");
++        person2.setEmail("test20000000000001@gmail.com");
++        person2.setRegistrationNumber("41DCT");
++        personRepository.save(person2);
++        ResponseEntity<Person[]> response = template.getForEntity("/api/person", Person[].class);
++        //Delete those users
++        personRepository.deleteById(person1.getId());
++        personRepository.deleteById(person2.getId());
++        Assert.assertTrue(response.getBody().length > 1);
++        Assert.assertEquals(200, response.getStatusCode().value());
++    }
++
++    private HttpEntity<Object> getHttpEntity(Object body) {
++        HttpHeaders headers = new HttpHeaders();
++        headers.setContentType(MediaType.APPLICATION_JSON);
++        return new HttpEntity<Object>(body, headers);
++    }
+ 
+ }
+diff --git a/src/test/java/com/crossover/techtrial/controller/RideControllerTest.java b/src/test/java/com/crossover/techtrial/controller/RideControllerTest.java
+new file mode 100644
+index 0000000..778afc8
+--- /dev/null
++++ b/src/test/java/com/crossover/techtrial/controller/RideControllerTest.java
+@@ -0,0 +1,146 @@
++/**
++ *
++ */
++package com.crossover.techtrial.controller;
++
++import com.crossover.techtrial.dto.TopDriverDTO;
++import com.crossover.techtrial.model.Person;
++import com.crossover.techtrial.model.Ride;
++import com.crossover.techtrial.repositories.PersonRepository;
++import com.crossover.techtrial.repositories.RideRepository;
++import org.junit.Assert;
++import org.junit.Before;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.mockito.Mock;
++import org.springframework.beans.factory.annotation.Autowired;
++import org.springframework.boot.test.context.SpringBootTest;
++import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
++import org.springframework.boot.test.web.client.TestRestTemplate;
++import org.springframework.http.HttpEntity;
++import org.springframework.http.HttpHeaders;
++import org.springframework.http.MediaType;
++import org.springframework.http.ResponseEntity;
++import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
++import org.springframework.test.web.servlet.MockMvc;
++import org.springframework.test.web.servlet.setup.MockMvcBuilders;
++import org.springframework.web.util.UriComponentsBuilder;
++
++import java.time.LocalDateTime;
++import java.time.format.DateTimeFormatter;
++
++/**
++ * @author Rene
++ */
++@RunWith(SpringJUnit4ClassRunner.class)
++@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
++public class RideControllerTest {
++
++    MockMvc mockMvc;
++
++    @Mock
++    private RideController rideController;
++
++    @Autowired
++    private TestRestTemplate template;
++
++    @Autowired
++    RideRepository rideRepository;
++
++    @Autowired
++    PersonRepository personRepository;
++
++    //private DateTimeFormatter formatter;
++
++    @Before
++    public void setup() throws Exception {
++        mockMvc = MockMvcBuilders.standaloneSetup(rideController).build();
++        //formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
++    }
++
++    @Test
++    public void testRideShouldBeRegistered() throws Exception {
++        Person person1 = new Person();
++        person1.setName("test 1");
++        person1.setEmail("test10000000000001@gmail.com");
++        person1.setRegistrationNumber("41DCT");
++        personRepository.save(person1);
++        Person person2 = new Person();
++        person2.setName("test 2");
++        person2.setEmail("test20000000000001@gmail.com");
++        person2.setRegistrationNumber("41DCT");
++        personRepository.save(person2);
++        HttpEntity<Object> ride = getHttpEntity(
++                "{\"startTime\":\"2018-08-24T09:00:00\",\"endTime\":\"2018-08-24T10:00:00\",\"distance\":15,\"driver\":{\"id\":" + person1.getId() + "},\"rider\":{\"id\":" + person2.getId() + "}}");
++        ResponseEntity<Ride> response = template.postForEntity(
++                "/api/ride", ride, Ride.class);
++        //Delete
++        personRepository.deleteById(person1.getId());
++        personRepository.deleteById(person2.getId());
++        Assert.assertEquals(new Long(15), response.getBody().getDistance());
++        Assert.assertEquals(200, response.getStatusCode().value());
++    }
++
++    @Test
++    public void testRideShouldNotBeRegistered() throws Exception {
++        HttpEntity<Object> ride = getHttpEntity(
++                "{\"startTime\":\"2018-08-24T10:00:00\",\"endTime\":\"2018-08-24T10:00:00\",\"distance\":15,\"driver\":{\"id\":0},\"rider\":{\"id\":0}}");
++        ResponseEntity<String> response = template.postForEntity(
++                "/api/ride", ride, String.class);
++        Assert.assertEquals(400, response.getStatusCode().value());
++    }
++
++    @Test
++    public void testRideShouldBeLoadedById() throws Exception {
++        Ride ride = new Ride();
++        Assert.assertTrue(ride.toString().contains("Ride"));
++        ride.setStartTime(LocalDateTime.parse("2018-08-24T10:00:00", DateTimeFormatter.ISO_LOCAL_DATE_TIME));
++        ride.setEndTime(LocalDateTime.parse("2018-08-24T11:00:00", DateTimeFormatter.ISO_LOCAL_DATE_TIME));
++        ride.setDistance(new Long(15));
++        rideRepository.save(ride);
++        ResponseEntity<Ride> response = template.getForEntity(
++                "/api/ride/" + ride.getId(), Ride.class);
++        //Delete this ride
++        rideRepository.deleteById(response.getBody().getId());
++        Assert.assertEquals(ride, response.getBody());
++        Assert.assertEquals(200, response.getStatusCode().value());
++    }
++
++    @Test
++    public void testRideShouldGetTopDriver() throws Exception {
++        Person person1 = new Person();
++        person1.setName("test 1");
++        person1.setEmail("test10000000000001@gmail.com");
++        person1.setRegistrationNumber("41DCT");
++        personRepository.save(person1);
++        Person person2 = new Person();
++        person2.setName("test 2");
++        person2.setEmail("test20000000000001@gmail.com");
++        person2.setRegistrationNumber("41DCT");
++        personRepository.save(person2);
++        HttpEntity<Object> ride1 = getHttpEntity(
++                "{\"startTime\":\"2018-08-24T09:00:00\",\"endTime\":\"2018-08-24T10:00:00\",\"distance\":15,\"driver\":{\"id\":" + person1.getId() + "},\"rider\":{\"id\":" + person2.getId() + "}}");
++        HttpEntity<Object> ride2 = getHttpEntity(
++                "{\"startTime\":\"2018-08-24T09:00:00\",\"endTime\":\"2018-08-24T10:30:00\",\"distance\":15,\"driver\":{\"id\":" + person2.getId() + "},\"rider\":{\"id\":" + person1.getId() + "}}");
++        ResponseEntity<Ride> response1 = template.postForEntity(
++                "/api/ride", ride1, Ride.class);
++        ResponseEntity<Ride> response2 = template.postForEntity(
++                "/api/ride", ride2, Ride.class);
++        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString("/api/top-rides")
++                .queryParam("startTime", "2018-08-24T08:00:00")
++                .queryParam("endTime", "2018-08-24T14:00:00");
++        ResponseEntity<TopDriverDTO[]> response = template.getForEntity(builder.toUriString(), TopDriverDTO[].class);
++        //Delete
++        personRepository.deleteById(person1.getId());
++        personRepository.deleteById(person2.getId());
++        Assert.assertTrue(response.getBody().length > 1);
++        Assert.assertEquals(200, response.getStatusCode().value());
++    }
++
++    private HttpEntity<Object> getHttpEntity(Object body) {
++        HttpHeaders headers = new HttpHeaders();
++        headers.setContentType(MediaType.APPLICATION_JSON);
++        return new HttpEntity<Object>(body, headers);
++    }
++
++}
+-- 
+2.9.0.windows.1
+
