@@ -3,21 +3,15 @@
  */
 package com.crossover.techtrial.controller;
 
-import org.junit.Assert;
+import com.crossover.techtrial.TestUtil;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -27,6 +21,17 @@ import com.crossover.techtrial.repositories.PersonRepository;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertThat;
+import static org.hamcrest.Matchers.*;
+
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+
+
 /**
  * @author kshah
  */
@@ -35,6 +40,12 @@ import java.util.List;
 public class PersonControllerTest {
 
     MockMvc mockMvc;
+
+    private static final String DEFAULT_NAME = "PersonName";
+    private static final String DEFAULT_EMAIL = "person@email.com";
+    private static final String DEFAULT_REGISTRATIONNUMBER = "PersonRegistrationNumber";
+
+    private Person person;
 
     @Mock
     private PersonController personController;
@@ -50,57 +61,61 @@ public class PersonControllerTest {
         mockMvc = MockMvcBuilders.standaloneSetup(personController).build();
     }
 
+    @Before
+    public void initTest() {
+        personRepository.deleteAll();
+        person = createEntity();
+    }
+
+    public static Person createEntity() {
+        Person person = new Person();
+        person.setName(DEFAULT_NAME);
+        person.setEmail(DEFAULT_EMAIL);
+        person.setRegistrationNumber(DEFAULT_REGISTRATIONNUMBER);
+        return person;
+    }
+
     /**
-     * Fixed test method name testPanelShouldBeRegistered
+     * Test method for creating a new entity and Entity getters.
      * remove registrationDate from json payload as not defined on Person Model
      */
     @Test
     public void testPersonShouldBeRegistered() throws Exception {
-        HttpEntity<Object> person = getHttpEntity(
-                "{\"name\": \"test 1\", \"email\": \"test10000000000001@gmail.com\","
-                        + " \"registrationNumber\": \"41DCT\"}");
-        ResponseEntity<Person> response = template.postForEntity(
-                "/api/person", person, Person.class);
-        //Delete this user
-        personRepository.deleteById(response.getBody().getId());
-        Assert.assertEquals("test 1", response.getBody().getName());
-        Assert.assertEquals(200, response.getStatusCode().value());
+        HttpEntity<Object> personHttp = getHttpEntity(TestUtil.convertObjectToJsonString(person));
+        ResponseEntity<Person> response = template.postForEntity("/api/person", personHttp, Person.class);
+        List<Person> personList = new ArrayList();
+        personRepository.findAll().forEach(personList::add);
+        Person testPerson = personList.get(personList.size() - 1);
+        assertThat(response.getStatusCode(), is(HttpStatus.OK));
+        assertThat(testPerson.getName()).isEqualTo(DEFAULT_NAME);
+        assertThat(testPerson.getEmail()).isEqualTo(DEFAULT_EMAIL);
+        assertThat(testPerson.getRegistrationNumber()).isEqualTo(DEFAULT_REGISTRATIONNUMBER);
     }
 
     @Test
     public void testPersonShouldBeLoadedById() throws Exception {
-        Person person = new Person();
-        Assert.assertTrue(person.toString().contains("Person"));
-        person.setName("test 1");
-        person.setEmail("test10000000000001@gmail.com");
-        person.setRegistrationNumber("41DCT");
         personRepository.save(person);
         ResponseEntity<Person> response = template.getForEntity(
                 "/api/person/" + person.getId(), Person.class);
-        //Delete this user
-        personRepository.deleteById(response.getBody().getId());
-        Assert.assertEquals(person, response.getBody());
-        Assert.assertEquals(200, response.getStatusCode().value());
+        assertThat(person).isEqualTo(response.getBody());
+        assertThat(response.getStatusCode(), is(HttpStatus.OK));
+    }
+
+    @Test
+    public void testPersonShouldNotBeFound() throws Exception {
+        ResponseEntity<Person> response = template.getForEntity(
+                "/api/person/" + Long.MAX_VALUE, Person.class);
+        assertThat(response.getStatusCode(), is(HttpStatus.NOT_FOUND));
     }
 
     @Test
     public void testPersonShouldBeAllLoaded() throws Exception {
-        Person person1 = new Person();
-        person1.setName("test 1");
-        person1.setEmail("test10000000000001@gmail.com");
-        person1.setRegistrationNumber("41DCT");
-        personRepository.save(person1);
-        Person person2 = new Person();
-        person2.setName("test 2");
-        person2.setEmail("test20000000000001@gmail.com");
-        person2.setRegistrationNumber("41DCT");
-        personRepository.save(person2);
+        personRepository.save(person);
+        person.setId(null);
+        personRepository.save(person);
         ResponseEntity<Person[]> response = template.getForEntity("/api/person", Person[].class);
-        //Delete those users
-        personRepository.deleteById(person1.getId());
-        personRepository.deleteById(person2.getId());
-        Assert.assertTrue(response.getBody().length > 1);
-        Assert.assertEquals(200, response.getStatusCode().value());
+        assertThat(response.getStatusCode(), is(HttpStatus.OK));
+        assertThat(response.getBody(), arrayWithSize(greaterThan(1)));
     }
 
     private HttpEntity<Object> getHttpEntity(Object body) {
@@ -108,13 +123,4 @@ public class PersonControllerTest {
         headers.setContentType(MediaType.APPLICATION_JSON);
         return new HttpEntity<Object>(body, headers);
     }
-
-    @Test
-    public void when() {
-        List<String> l = Mockito.mock(ArrayList.class);
-        l.add("o");
-        Mockito.verify(l).add("o");
-        Assert.assertEquals(0, l.size());
-    }
-
 }
